@@ -48,8 +48,17 @@ let rec get_4bits ?rel_pos:(rel_pos=0) position bits =
   | _ ->
     bit * (2 *** rel_pos) + get_4bits position bits ~rel_pos:(rel_pos + 1)
 
+(* Addresses in opcodes are always the 12 last bits, so this functions
+ * get them and return a valid int representing the address *)
 let get_addr bits =
   256 * get_4bits 1 bits + 16 * get_4bits 2 bits + get_4bits 3 bits
+
+(* Some opcodes relie on the last byte to handle values, so this
+ * function gets it and return its value. *)
+
+let get_byte bits =
+  16 * get_4bits 2 bits + get_4bits 3 bits
+
 
 let decode_opcode opcode =
   let digit0 = get_4bits 0 opcode in
@@ -59,11 +68,11 @@ let decode_opcode opcode =
     0x0 ->
     begin
       match opcode with
-      (* Clean the screen by setting all the bytes reserved bytes
+      (* 00E0 : Clean the screen by setting all the bytes reserved bytes
        * for the graphics to zero. *)
         0x00E0 ->
         Array.fill ram graph_start 256 0
-      (* Return from a subroutine by setting the program counter
+      (* 00EE : Return from a subroutine by setting the program counter
        * to the value on the top of the stack and decrementing the
        * stack pointer. *)
       | 0x00EE ->
@@ -72,12 +81,24 @@ let decode_opcode opcode =
       | _ -> raise Unknown_opcode
     end
   | 0x1 ->
-    (* Jump to the address defined by the 12 last bits by setting
-     * the program counter to it. *)
+    (* 1NNN : Jump to the address NNN, defined by the 12 last bits, by
+     * setting the program counter to it. *)
     pc := get_addr opcode
   | 0x2 ->
-    sp := !sp + 1 (* Increments the stack pointer *)
-  | 0x3
+    (* 2NNN : Call the subroutine at the adress NNN, defined by the 12
+     * last bits, by saving the program counter on top of the stack and
+     *  setting the program counter to the adress.*)
+    sp := !sp + 1;        (*         Increments the stack pointer         *)
+    stack.(!sp) <- !pc;   (* Save the program counter on top of the stack *)
+    pc := get_addr opcode (*   Set the program counter to its new value   *)
+  | 0x3 ->
+    (* 3XKK : Skip the next instruction if the value in the register number X
+     * is equal to KK by comparing them and adding 2 to them program counter
+     * if needed *)
+    let kk = get_byte opcode in    (*        Get the last byte       *)
+    let x  = get_4bits 1 opcode in (* Get the number of the register *)
+    if kk = regs.(x) then
+      pc := !pc + 2
   | 0x4
   | 0x5
   | 0x6
