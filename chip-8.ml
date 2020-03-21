@@ -1,6 +1,6 @@
 (* First we declare the memory as arrays *)
 (*   The RAM is a 4096 byte array (4K)   *)
-let ram = Array.make 4096 0
+let ram = Array.make 4096 0xFF 
 (* There are 16 registers *)
 let regs = Array.make 16 0
 (* Plus some special registers *)
@@ -17,6 +17,8 @@ let delay_timer = ref 0
 let i = ref 0
 (* Finally we declare the stack as an array of 16 values *)
 let stack = Array.make 16 0
+(* Magic numbers *)
+let prog_start = 0x200
 
 (* The standard ocaml ** function has type float -> float -> float
    which causes problems because we need for the binary to int
@@ -43,5 +45,6 @@ let rec get_4bits ?rel_pos:(rel_pos=0) position bits =
     bit * (2 *** rel_pos) + get_4bits position bits ~rel_pos:(rel_pos + 1)
  
 let () =
-  let test = get_4bits 3 0xAFFF in 
+  pc := prog_start;
+  let test = get_4bits 3 ram.(!pc) in 
   print_int test
