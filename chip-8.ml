@@ -35,6 +35,12 @@ let rec ( *** ) a b =
   | 1 -> a
   | _ -> a * (a *** (b-1))
 
+(* Create a function like the "+=" of C to avoid code
+ * redundancy. *)
+
+let ( += ) a b =
+  a := !a + b
+
 (* Here we declare a function to get 4 bits of an integer which
  * coresponds to a hexadecimal digit and in order to decode
  * opcodes, we need to analyze each hex digit. *)
@@ -64,6 +70,12 @@ let decode_opcode opcode =
   let digit0 = get_4bits 0 opcode in
   (* Find the instruction that have to be executed by using
    * the first 4 bits *)
+  (* Gat all the different values that may be used by the opcodes *)
+  let kk   = get_byte opcode    in
+  let x    = get_4bits 1 opcode in
+  let y    = get_4bits 2 opcode in
+  let n    = get_4bits 3 opcode in
+  let addr = get_addr opcode    in
   match digit0 with
     0x0 ->
     begin
@@ -83,34 +95,73 @@ let decode_opcode opcode =
   | 0x1 ->
     (* 1NNN : Jump to the address NNN, defined by the 12 last bits, by
      * setting the program counter to it. *)
-    pc := get_addr opcode
+    pc := addr
   | 0x2 ->
     (* 2NNN : Call the subroutine at the adress NNN, defined by the 12
      * last bits, by saving the program counter on top of the stack and
      *  setting the program counter to the adress.*)
-    sp := !sp + 1;        (*         Increments the stack pointer         *)
-    stack.(!sp) <- !pc;   (* Save the program counter on top of the stack *)
-    pc := get_addr opcode (*   Set the program counter to its new value   *)
+    sp += 1;            (*         Increments the stack pointer         *)
+    stack.(!sp) <- !pc; (* Save the program counter on top of the stack *)
+    pc := addr          (*   Set the program counter to its new value   *)
   | 0x3 ->
     (* 3XKK : Skip the next instruction if the value in the register number X
      * is equal to KK by comparing them and adding 2 to them program counter
      * if needed *)
-    let kk = get_byte opcode in    (*        Get the last byte       *)
-    let x  = get_4bits 1 opcode in (* Get the number of the register *)
-    if kk = regs.(x) then
-      pc := !pc + 2
-  | 0x4
-  | 0x5
-  | 0x6
-  | 0x7
-  | 0x8
-  | 0x9
-  | 0xA
-  | 0xB
-  | 0xC
-  | 0xD
-  | 0xE
-  | 0xF
+    if kk = regs.(x) then pc += 2
+  | 0x4 ->
+    (* 4XKK : Skip the next instruction if the value in the register number X
+     * is not nequal to KK by comparing them and adding 2 to them program counter
+     * if needed *)
+    if kk <> regs.(x) then pc += 2
+  | 0x5 ->
+    begin
+      match n with
+        0 ->
+        (* 5XY0 : Skip the next instruction if the values in the registers X and
+         * Y are equal by comparing them and adding 2 to the program counter if
+         * needed. *)
+        if x = y then pc += 2
+      | _ -> raise Unknown_opcode
+    end
+  | 0x6 ->
+    (* 6XKK : puts the value KK into the register X. *)
+    regs.(x) <- kk
+  | 0x7 ->
+    (* 7XKK : Increments the register X by the value KK *)
+    regs.(x) <- kk + regs.(x) (* We can't use the function += because it is an
+                               * array and not a mutable variable. *)
+  | 0x8 ->
+    begin
+      match n with
+      (* 8XY0 : stores the value of the register Y in the register X. *)
+        0 -> regs.(x) <- regs.(y)
+      (* 8XY1 : stores in the register X the bitwise or of X and Y. *)
+      | 1 -> regs.(x) <- regs.(y) lor regs.(x)
+      | 2 -> regs.(x) <- regs.(y) land regs.(x)
+      | 3 -> regs.(x) <- regs.(y) lxor regs.(x)
+      | 4 ->
+        let sum = regs.(x) + regs.(y) in
+        if sum <= 255 then regs.(x) <- sum
+        else
+          begin
+            regs.(0xF) <- 1;
+            regs.(x)   <- 255
+          end
+      | 5 ->
+        regs.(x) <- regs.(x) - regs.(y);
+        if regs.(x) > regs.(y) then
+            regs.(0xF) <- 1
+      | 6 ->
+        regs.(0xF) <- regs.(x) mod 2;
+        regs.(x)   <- regs.(x) asr 1
+    end
+  | 0x9 ->
+  | 0xA ->
+  | 0xB ->
+  | 0xC ->
+  | 0xD ->
+  | 0xE ->
+  | 0xF ->
 
 let () =
   pc := prog_start;
