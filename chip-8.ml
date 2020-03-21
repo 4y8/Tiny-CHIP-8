@@ -30,15 +30,18 @@ let rec ( *** ) a b =
   | _ -> a * (a *** (b-1))
 
 (* Here we declare a function to get 4 bits of an integer which
-   coresponds to a hexadecimal digit *)
+   coresponds to a hexadecimal digit and in order to decode
+   opcodes, we need to analyze each hex digit. *)
 
 let rec get_4bits ?rel_pos:(rel_pos=0) position bits = 
-  let bit = (bits asr (position + rel_pos)) land 1 in
+  (* Here we substract 4 times the position to 12 because it 
+     allows the position 0 to be the left digit and 3 the right *)
+  let bit = (bits asr (12 - position * 4 + rel_pos)) land 1 in
   match rel_pos with 
-   4 -> 0
-  |_ ->
-bit * (2 *** rel_pos) + get_4bits (position + 1) bits ~rel_pos:(rel_pos + 1)
+    4 -> 0
+  | _ ->
+    bit * (2 *** rel_pos) + get_4bits position bits ~rel_pos:(rel_pos + 1)
  
 let () =
-  let test = get_4bits 4 ram.(0) in 
+  let test = get_4bits 3 0xAFFF in 
   print_int test
