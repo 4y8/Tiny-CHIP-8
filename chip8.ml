@@ -74,7 +74,7 @@ let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
   match rel_pos with
     8 -> ()
   | _ ->
-    let pix = (pixel asr (7-rel_pos)) land 1 in
+    let pix = (pixel asr (7 - rel_pos)) land 1 in
     begin
       match pix with
         0 ->
@@ -83,7 +83,7 @@ let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
         Graphics.set_color Graphics.white;
       | _ -> raise Internal_error
     end;
-    Graphics.fill_rect ((x + rel_pos) * 10) (y * 10) 10 10;
+    Graphics.fill_rect ((x + rel_pos) * 10) (320 - y * 10) 10 10;
     draw_pixel ~rel_pos:(rel_pos + 1) pixel x y
 
 let rec draw ?rel_y:(rel_y=0) display =
@@ -102,8 +102,9 @@ let rec draw_sprite x y bytes =
     0 ->
     let fx = x mod 64 in
     let place y2 byte =
+      (* Calculate the memory emplacement of the sprite. *)
       let place = graph_start + fx / 8 + 8 * y2 + y * 8 in
-      ram.(place) <- byte lxor ram.(place) (* Tha sprite is "xored" on
+      ram.(place) <- byte lxor ram.(place) (* The sprite is "xored" on
                                             * the screen. *)
     in
     Array.iteri place bytes
@@ -111,14 +112,13 @@ let rec draw_sprite x y bytes =
     let shift a = a asr m               in
     let shift1  = Array.map shift bytes in
     draw_sprite (8 * (x / 8)) y shift1;
-    let rec first_bits ?rel:(rel=0) byte =
+    let rec first_bits ?rel:(rel=0) byte w =
       if m = rel then 0
       else
-        (byte land 1) *** rel +
-        first_bits (byte asr 1) ~rel:(rel + 1)
+        (byte land 1) * 2 *** rel + first_bits (byte asr 1) w ~rel:(rel + 1)
     in
     let shift_left byte =
-      (first_bits byte) lsl (8 - m)
+      (first_bits byte m) lsl (8 - m)
     in
     let shift2 = Array.map shift_left bytes in
     draw_sprite (8 * (x / 8) + 8) y shift2
@@ -266,7 +266,5 @@ let () =
   Random.self_init();
   graph_init;
   pc := prog_start;
-  draw_sprite 1 1 [|0xFF|];
-  draw_sprite 0 0 [|0xFF|];
   draw (Array.sub ram graph_start 256);
   while true do print_string "" done
