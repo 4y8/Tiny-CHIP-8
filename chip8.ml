@@ -1,6 +1,6 @@
 (* First we declare the memory as arrays *)
 (*   The RAM is a 4096 byte array (4K)   *)
-let ram = Array.make 4096 0xFF 
+let ram = Array.make 4096 0x2F
 (* There are 16 registers *)
 let regs = Array.make 16 0
 (* Plus some special registers *)
@@ -23,6 +23,7 @@ let graph_start = 0xF00
 
 (* Define error messages *)
 exception Unknown_opcode
+exception Internal_error
 
 (* The standard ocaml ** function has type float -> float -> float
  * which causes problems because we need for the binary to int
@@ -65,7 +66,37 @@ let get_addr bits =
 let get_byte bits =
   16 * get_4bits 2 bits + get_4bits 3 bits
 
+let graph_init =
+  Graphics.open_graph " 640x320 ";
+  Graphics.set_window_title "chip-8"
 
+let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
+  match rel_pos with
+    7 -> ()
+  | _ ->
+    let pix = (pixel asr rel_pos) land 1 in
+    begin
+      match pix with
+        0 ->
+        Graphics.set_color Graphics.black;
+      | 1 ->
+        Graphics.set_color Graphics.white;
+      | _ -> raise Internal_error
+    end;
+    Graphics.fill_rect ((x + rel_pos) * 10) (y * 10) 10 10;
+    draw_pixel ~rel_pos:(rel_pos + 1) pixel (x + 7) y
+
+let rec draw ?rel_y:(rel_y=0) display =
+  match rel_y with
+    32 -> ()
+  | _  ->
+    let draw_relpix index pixel =
+      draw_pixel pixel index rel_y
+    in
+    Array.iteri draw_relpix (Array.sub display 0 8);
+    draw ~rel_y: (rel_y + 1) (Array.sub display 8 (256 - 8 * (rel_y + 1)))
+
+(* Decode a 2-bytes opcode and execute its content. *)
 let decode_opcode opcode =
   let digit0 = get_4bits 0 opcode in
   (* Find the instruction that have to be executed by using
@@ -137,7 +168,9 @@ let decode_opcode opcode =
         0 -> regs.(x) <- regs.(y)
       (* 8XY1 : stores in the register X the bitwise or of X and Y. *)
       | 1 -> regs.(x) <- regs.(y) lor regs.(x)
+      (* 8XY1 : stores in the register X the bitwise and of X and Y. *)
       | 2 -> regs.(x) <- regs.(y) land regs.(x)
+      (* 8XY1 : stores in the register X the bitwise xor of X and Y. *)
       | 3 -> regs.(x) <- regs.(y) lxor regs.(x)
       | 4 ->
         let sum = regs.(x) + regs.(y) in
@@ -154,16 +187,47 @@ let decode_opcode opcode =
       | 6 ->
         regs.(0xF) <- regs.(x) mod 2;
         regs.(x)   <- regs.(x) asr 1
+      | 7 ->
+        regs.(x) <- regs.(y) - regs.(x);
+        if regs.(x) < regs.(y) then
+            regs.(0xF) <- 1
+      | 0xE ->
+        regs.(0xF) <- (regs.(x) asr 7) land 1;
+        regs.(x)   <- regs.(x) asr 1
+      | _ -> raise Unknown_opcode
     end
   | 0x9 ->
+    begin
+      match n with
+        0 ->
+        (* 9XY0 : Skip the next instruction if the values in the registers X and
+         * Y are not equal by comparing them and adding 2 to the program counter if
+         * needed. *)
+        if x <> y then pc += 2
+      | _ -> raise Unknown_opcode
+    end
   | 0xA ->
+    (* ANNN : set the register I to the value NNN. *)
+    i := addr
   | 0xB ->
+    (* BNNN : jump to the address NNN plus the value of the 0th register by
+     * setting the program counter to it. *)
+    pc := addr + regs.(0)
   | 0xC ->
-  | 0xD ->
-  | 0xE ->
-  | 0xF ->
+    (* CXKK : Generate a random number, bitwise and it and puts the result
+     * in the X register. *)
+    regs.(x) <- kk land (Random.int 256)
+  | 0xD -> ()
+  | 0xE -> ()
+  | 0xF -> ()
+  | _   -> raise Unknown_opcode
 
 let () =
+  (* An opcode needs a random number, so we initiate the generator. *)
+  Random.self_init();
+  graph_init;
   pc := prog_start;
   let test = get_4bits 3 ram.(!pc) in 
-  print_int test
+  print_int test;
+  draw (Array.sub ram graph_start 256);
+  while true do print_string "" done

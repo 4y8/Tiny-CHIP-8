@@ -1,2 +1,3 @@
 (executable
- (name chip-8))
+ (name chip8)
+ (libraries graphics))
