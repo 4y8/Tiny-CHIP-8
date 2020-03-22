@@ -20,6 +20,31 @@ let stack = Array.make 16 0
 (* Magic numbers *)
 let prog_start  = 0x200
 let graph_start = 0xF00
+(* Here we define the keyboard layout *)
+let layout = "\"'(-ertydfghcvbn"
+(* The interpreter has to have a simple font built into its
+ * ram *)
+let font =
+  [|
+    0xF0; 0x90; 0x90; 0x90; 0xF0; (* 0 *)
+    0x20; 0x60; 0x20; 0x20; 0x70; (* 1 *)
+    0xF0; 0x10; 0xF0; 0x80; 0xF0; (* 2 *)
+    0xF0; 0x10; 0xF0; 0x10; 0xF0; (* 3 *)
+    0x90; 0x90; 0xF0; 0x10; 0x10; (* 4 *)
+    0xF0; 0x80; 0xF0; 0x10; 0xF0; (* 5 *)
+    0xF0; 0x80; 0xF0; 0x90; 0xF0; (* 6 *)
+    0xF0; 0x10; 0x20; 0x40; 0x40; (* 7 *)
+    0xF0; 0x90; 0xF0; 0x90; 0xF0; (* 8 *)
+    0xF0; 0x90; 0xF0; 0x10; 0xF0; (* 9 *)
+    0xF0; 0x90; 0xF0; 0x90; 0x90; (* A *)
+    0xE0; 0x90; 0xE0; 0x90; 0xE0; (* B *)
+    0xF0; 0x80; 0x80; 0x80; 0xF0; (* C *)
+    0xE0; 0x90; 0x90; 0x90; 0xE0; (* D *)
+    0xF0; 0x80; 0xF0; 0x80; 0xF0; (* E *)
+    0xF0; 0x80; 0xF0; 0x80; 0x80  (* F *)
+  |]
+
+let last_time = ref (Unix.gettimeofday())
 
 (* Define error messages *)
 exception Unknown_opcode
@@ -66,9 +91,30 @@ let get_addr bits =
 let get_byte bits =
   16 * get_4bits 2 bits + get_4bits 3 bits
 
-let graph_init =
+let int_of_bool bool =
+  match bool with
+    true  -> 1
+  | false -> 0
+
+let init =
+  (* Creates the window *)
   Graphics.open_graph " 640x320 ";
-  Graphics.set_window_title "chip-8"
+  Graphics.set_window_title "chip-8";
+  (* Puts the font in its position. The font is on the beginning of the
+   * ram and 80 is the number of elemnts in the font list. *)
+  Array.blit font 0 ram 0 80;
+  pc := prog_start;
+  (* An opcode needs a random number, so we initiate the generator. *)
+  Random.self_init();
+  let ic = open_in Sys.argv.(1) in
+  let rec read_chan chan pos =
+    try
+      ram.(prog_start + pos) <- Char.code (input_char ic);
+      read_chan chan (pos + 1)
+    with
+      End_of_file -> ()
+  in
+  read_chan ic 0
 
 let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
   match rel_pos with
@@ -98,20 +144,30 @@ let rec draw ?rel_y:(rel_y=0) display =
       (Array.sub display 8 (256 - 8 * (rel_y + 1)))
 
 let rec draw_sprite x y bytes =
+    let fx = x mod 64 + ((int_of_bool (x < 0)) * 32) in
+    let fy = y mod 32 + ((int_of_bool (y < 0)) * 32) in
   match x mod 8 with
     0 ->
-    let fx = x mod 64 in
+    print_int fy;
+    print_newline();
+    print_int fx;
+    print_newline();
+    regs.(0xF) <- 0;
     let place y2 byte =
       (* Calculate the memory emplacement of the sprite. *)
-      let place = graph_start + fx / 8 + 8 * y2 + y * 8 in
-      ram.(place) <- byte lxor ram.(place) (* The sprite is "xored" on
-                                            * the screen. *)
+      let place = graph_start + fx / 8 + ((fy + y2) mod 32) * 8 in
+      let save  = ram.(place) in
+      ram.(place) <- byte lxor ram.(place); (* The sprite is "xored" on
+                                             * the screen. *)
+      if regs.(0xF) = 0 then
+        regs.(0xF) <- int_of_bool (save > (save land ram.(place)))
     in
     Array.iteri place bytes
   | m ->
     let shift a = a asr m               in
     let shift1  = Array.map shift bytes in
-    draw_sprite (8 * (x / 8)) y shift1;
+    draw_sprite (8 * (fx / 8)) fy shift1;
+    let sv = regs.(0xF) in
     let rec first_bits ?rel:(rel=0) byte w =
       if m = rel then 0
       else
@@ -121,7 +177,14 @@ let rec draw_sprite x y bytes =
       (first_bits byte m) lsl (8 - m)
     in
     let shift2 = Array.map shift_left bytes in
-    draw_sprite (8 * (x / 8) + 8) y shift2
+    draw_sprite (8 * (fx / 8) + 8) fy shift2;
+    regs.(0xF) <- (sv + regs.(0xF)) / 2
+
+let is_pressed key =
+  match Graphics.key_pressed() with
+    false -> false
+  | _     -> Graphics.read_key() = key
+
 
 (* Decode a 2-bytes opcode and execute its content. *)
 let decode_opcode opcode =
@@ -141,26 +204,27 @@ let decode_opcode opcode =
       (* 00E0 : Clean the screen by setting all the bytes reserved bytes
        * for the graphics to zero. *)
         0x00E0 ->
-        Array.fill ram graph_start 256 0
+        Array.fill ram graph_start 256 0;
+        draw (Array.sub ram graph_start 256 )
       (* 00EE : Return from a subroutine by setting the program counter
        * to the value on the top of the stack and decrementing the
        * stack pointer. *)
       | 0x00EE ->
-        pc := stack.(!sp);
+        pc := stack.(!sp) - 2;
         sp := !sp - 1     (* Decrements the stack pointer *)
       | _ -> raise Unknown_opcode
     end
   | 0x1 ->
     (* 1NNN : Jump to the address NNN, defined by the 12 last bits, by
      * setting the program counter to it. *)
-    pc := addr
+    pc := addr - 2
   | 0x2 ->
     (* 2NNN : Call the subroutine at the adress NNN, defined by the 12
      * last bits, by saving the program counter on top of the stack and
      *  setting the program counter to the adress.*)
     sp += 1;            (*         Increments the stack pointer         *)
-    stack.(!sp) <- !pc; (* Save the program counter on top of the stack *)
-    pc := addr          (*   Set the program counter to its new value   *)
+    stack.(!sp) <- !pc + 2; (* Save the program counter on top of the stack *)
+    pc := addr - 2      (*   Set the program counter to its new value   *)
   | 0x3 ->
     (* 3XKK : Skip the next instruction if the value in the register number X
      * is equal to KK by comparing them and adding 2 to them program counter
@@ -186,8 +250,9 @@ let decode_opcode opcode =
     regs.(x) <- kk
   | 0x7 ->
     (* 7XKK : Increments the register X by the value KK *)
-    regs.(x) <- kk + regs.(x) (* We can't use the function += because it is an
-                               * array and not a mutable variable. *)
+    regs.(x) <- kk + regs.(x); (* We can't use the function += because it is an
+                                * array and not a mutable variable. *)
+    regs.(x) <- regs.(x) - (int_of_bool (regs.(x) > 255) * 256)
   | 0x8 ->
     begin
       match n with
@@ -203,30 +268,25 @@ let decode_opcode opcode =
        * Y and set the register F to 1 if the sum overflows. *)
       | 4 ->
         let sum = regs.(x) + regs.(y) in
-        if sum <= 255 then regs.(x) <- sum
-        else
-          begin
-            regs.(0xF) <- 1;
-            regs.(x)   <- sum - 256 (* Here we simulate an add overflow. *)
-          end
+        regs.(0xF) <- int_of_bool(sum < 255);
+        regs.(x) <- sum;
+        if sum > 255 then regs.(x) <- sum - 256 (* Here we simulate an add overflow. *)
       (* 8XY5 : stores in the register X the difference between the registers
        * X and Y and set the register F to 1 if there isn't a quarry. *)
       | 5 ->
         regs.(x) <- regs.(x) - regs.(y);
-        if regs.(x) > regs.(y) then
-            regs.(0xF) <- 1
-        else regs.(x) <- regs.(x) + 256 (* We can't have a negative number
-                                         *  in the register*)
+        regs.(0xF) <- int_of_bool (regs.(x) > regs.(y));
+        if regs.(x) < regs.(y) then regs.(x) <- regs.(x) + 256
+       (* We can't have a negative number in the register*)
       | 6 ->
         (* 8XY6 : set the last bit of X in the register F and perform a
          * bitwise right shift to the register X *)
         regs.(0xF) <- regs.(x) mod 2;
         regs.(x)   <- regs.(x) asr 1
       | 7 ->
-        regs.(x) <- regs.(y) - regs.(x);
-        if regs.(x) < regs.(y) then
-          regs.(0xF) <- 1
-        else regs.(x) <- regs.(x) + 256
+        regs.(x)   <- regs.(y) - regs.(x);
+        regs.(0xF) <- int_of_bool (regs.(x) < regs.(y));
+        if regs.(x) > regs.(y) then regs.(x) <- regs.(x) + 256
       | 0xE ->
         regs.(0xF) <- (regs.(x) asr 7) land 1;
         regs.(x)   <- regs.(x) asr 1
@@ -248,23 +308,107 @@ let decode_opcode opcode =
   | 0xB ->
     (* BNNN : jump to the address NNN plus the value of the 0th register by
      * setting the program counter to it. *)
-    pc := addr + regs.(0)
+    pc := addr + regs.(0) - 2
   | 0xC ->
     (* CXKK : Generate a random number, bitwise and it and puts the result
      * in the X register. *)
     regs.(x) <- kk land (Random.int 256)
   | 0xD ->
     (* DXYN : display a sprite of n-byte at the memory location in the register
-     * I at the coordinates X,Y. *)
-    ()
-  | 0xE -> ()
-  | 0xF -> ()
+     * I at the coordinates in the registers X and Y. *)
+    draw_sprite regs.(x) regs.(y) (Array.sub ram !i n);
+    draw (Array.sub ram graph_start 256 )
+  | 0xE ->
+    begin
+      match kk with
+        0x9E ->
+        (* EX9E : skips the next instruction if the key pressed has the
+         * same value as the one in the register X. *)
+        pc += 2 * int_of_bool (is_pressed(String.get layout regs.(x)))
+      | 0xA1 ->
+        (* EX9E : skips the next instruction if the key pressed has not
+         * the same value as the one in the register X. *)
+        print_int regs.(x);
+        print_int(!pc);
+        print_newline();
+        pc += 2 * int_of_bool (not (is_pressed(String.get layout regs.(x))))
+      | _ -> raise Unknown_opcode
+    end
+  | 0xF ->
+    begin
+      match kk with
+        0x07 ->
+        (* FX07 : set the value of the delay timer in the register X. *)
+        regs.(x) <- !delay_timer
+      | 0x0A ->
+        (* FX0A : wait for a keypress and put its result in the X register. *)
+        let rec wait_for_key () =
+          match String.index_opt layout (Graphics.read_key()) with
+            None -> wait_for_key ()
+          | Some x -> x
+        in
+        regs.(x) <- wait_for_key()
+      | 0x15 ->
+        (* FX15 : Set the value of the delay timer to the value of the
+         * register X. *)
+        delay_timer := regs.(x)
+      | 0x18 ->
+        (* FX15 : Set the value of the sound timer to the value of the
+         * register X. *)
+        sound_timer := regs.(x)
+      | 0x1E ->
+        (* FX1E : increment the value of I by the one of the register X. *)
+        i += regs.(x)
+      | 0x29 ->
+        (* FX29 : set the value of I to the location of the sprite corresponding
+         * to the register X. *)
+        i := regs.(x) * 5
+      | 0x33 ->
+        (* FX33 : put in the address i, i+1, i+2 the decimal digits of the values
+         * in the register X. *)
+        ram.(!i)     <- regs.(x) / 100;
+        ram.(!i + 1) <- (regs.(x) - ram.(!i) * 100) / 10;
+        ram.(!i + 2) <- regs.(x) - ram.(!i) * 100 - ram.(!i + 1) * 10
+      | 0x55 ->
+        (* FX55 : save the registers from 0 to X in the ram starting at the
+         * address strored in i. *)
+        let rec save_reg registers pos =
+          match registers with
+            []       -> ()
+          | hd :: tl ->
+            ram.(!i + pos) <- hd;
+            save_reg tl (pos + 1)
+        in
+        save_reg (Array.to_list (Array.sub regs 0 x)) 0
+      | 0x65 ->
+       (* FX65 : read the registers from 0 to X from the ram starting at the
+         * address strored in i. *)
+        let rec read_reg registers pos =
+          match registers with
+            []       -> ()
+          | hd :: tl ->
+            regs.(pos) <- hd;
+            read_reg tl (pos + 1)
+        in
+        read_reg (Array.to_list (Array.sub ram !i x)) 0
+      | _ -> raise Unknown_opcode
+    end
   | _   -> raise Unknown_opcode
 
-let () =
-  (* An opcode needs a random number, so we initiate the generator. *)
-  Random.self_init();
-  graph_init;
-  pc := prog_start;
-  draw (Array.sub ram graph_start 256);
-  while true do print_string "" done
+let cycle() =
+  if (Unix.gettimeofday() -. !last_time) >= 1.0/.60.0 then
+    begin
+      last_time   := Unix.gettimeofday();
+      sound_timer += - int_of_bool (!sound_timer > 0);
+      delay_timer += - int_of_bool (!delay_timer > 0)
+    end;
+  print_int (ram.(!pc) lsl 8 lor ram.(!pc + 1));
+  print_newline();
+  decode_opcode ((ram.(!pc) lsl 8) lor ram.(!pc + 1));
+  pc += 2
+
+let _ =
+  init;
+  while true do
+    cycle()
+  done
