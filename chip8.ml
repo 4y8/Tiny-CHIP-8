@@ -1,6 +1,6 @@
 (* First we declare the memory as arrays *)
 (*   The RAM is a 4096 byte array (4K)   *)
-let ram = Array.make 4096 0x2F
+let ram = Array.make 4096 0x00
 (* There are 16 registers *)
 let regs = Array.make 16 0
 (* Plus some special registers *)
@@ -72,9 +72,9 @@ let graph_init =
 
 let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
   match rel_pos with
-    7 -> ()
+    8 -> ()
   | _ ->
-    let pix = (pixel asr rel_pos) land 1 in
+    let pix = (pixel asr (7-rel_pos)) land 1 in
     begin
       match pix with
         0 ->
@@ -84,17 +84,44 @@ let rec draw_pixel ?rel_pos:(rel_pos=0) pixel x y =
       | _ -> raise Internal_error
     end;
     Graphics.fill_rect ((x + rel_pos) * 10) (y * 10) 10 10;
-    draw_pixel ~rel_pos:(rel_pos + 1) pixel (x + 7) y
+    draw_pixel ~rel_pos:(rel_pos + 1) pixel x y
 
 let rec draw ?rel_y:(rel_y=0) display =
   match rel_y with
     32 -> ()
   | _  ->
     let draw_relpix index pixel =
-      draw_pixel pixel index rel_y
+      draw_pixel pixel (index * 7) rel_y
     in
     Array.iteri draw_relpix (Array.sub display 0 8);
-    draw ~rel_y: (rel_y + 1) (Array.sub display 8 (256 - 8 * (rel_y + 1)))
+    draw ~rel_y: (rel_y + 1)
+      (Array.sub display 8 (256 - 8 * (rel_y + 1)))
+
+let rec draw_sprite x y bytes =
+  match x mod 8 with
+    0 ->
+    let fx = x mod 64 in
+    let place y2 byte =
+      let place = graph_start + fx / 8 + 8 * y2 + y * 8 in
+      ram.(place) <- byte lxor ram.(place) (* Tha sprite is "xored" on
+                                            * the screen. *)
+    in
+    Array.iteri place bytes
+  | m ->
+    let shift a = a asr m               in
+    let shift1  = Array.map shift bytes in
+    draw_sprite (8 * (x / 8)) y shift1;
+    let rec first_bits ?rel:(rel=0) byte =
+      if m = rel then 0
+      else
+        (byte land 1) *** rel +
+        first_bits (byte asr 1) ~rel:(rel + 1)
+    in
+    let shift_left byte =
+      (first_bits byte) lsl (8 - m)
+    in
+    let shift2 = Array.map shift_left bytes in
+    draw_sprite (8 * (x / 8) + 8) y shift2
 
 (* Decode a 2-bytes opcode and execute its content. *)
 let decode_opcode opcode =
@@ -168,29 +195,38 @@ let decode_opcode opcode =
         0 -> regs.(x) <- regs.(y)
       (* 8XY1 : stores in the register X the bitwise or of X and Y. *)
       | 1 -> regs.(x) <- regs.(y) lor regs.(x)
-      (* 8XY1 : stores in the register X the bitwise and of X and Y. *)
+      (* 8XY2 : stores in the register X the bitwise and of X and Y. *)
       | 2 -> regs.(x) <- regs.(y) land regs.(x)
-      (* 8XY1 : stores in the register X the bitwise xor of X and Y. *)
+      (* 8XY3 : stores in the register X the bitwise xor of X and Y. *)
       | 3 -> regs.(x) <- regs.(y) lxor regs.(x)
+      (* 8XY4 : stores in the register X the sum of the registers X and
+       * Y and set the register F to 1 if the sum overflows. *)
       | 4 ->
         let sum = regs.(x) + regs.(y) in
         if sum <= 255 then regs.(x) <- sum
         else
           begin
             regs.(0xF) <- 1;
-            regs.(x)   <- 255
+            regs.(x)   <- sum - 256 (* Here we simulate an add overflow. *)
           end
+      (* 8XY5 : stores in the register X the difference between the registers
+       * X and Y and set the register F to 1 if there isn't a quarry. *)
       | 5 ->
         regs.(x) <- regs.(x) - regs.(y);
         if regs.(x) > regs.(y) then
             regs.(0xF) <- 1
+        else regs.(x) <- regs.(x) + 256 (* We can't have a negative number
+                                         *  in the register*)
       | 6 ->
+        (* 8XY6 : set the last bit of X in the register F and perform a
+         * bitwise right shift to the register X *)
         regs.(0xF) <- regs.(x) mod 2;
         regs.(x)   <- regs.(x) asr 1
       | 7 ->
         regs.(x) <- regs.(y) - regs.(x);
         if regs.(x) < regs.(y) then
-            regs.(0xF) <- 1
+          regs.(0xF) <- 1
+        else regs.(x) <- regs.(x) + 256
       | 0xE ->
         regs.(0xF) <- (regs.(x) asr 7) land 1;
         regs.(x)   <- regs.(x) asr 1
@@ -217,7 +253,10 @@ let decode_opcode opcode =
     (* CXKK : Generate a random number, bitwise and it and puts the result
      * in the X register. *)
     regs.(x) <- kk land (Random.int 256)
-  | 0xD -> ()
+  | 0xD ->
+    (* DXYN : display a sprite of n-byte at the memory location in the register
+     * I at the coordinates X,Y. *)
+    ()
   | 0xE -> ()
   | 0xF -> ()
   | _   -> raise Unknown_opcode
@@ -227,7 +266,7 @@ let () =
   Random.self_init();
   graph_init;
   pc := prog_start;
-  let test = get_4bits 3 ram.(!pc) in 
-  print_int test;
+  draw_sprite 1 1 [|0xFF|];
+  draw_sprite 0 0 [|0xFF|];
   draw (Array.sub ram graph_start 256);
   while true do print_string "" done
