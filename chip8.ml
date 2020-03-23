@@ -21,7 +21,7 @@ let stack = Array.make 16 0
 let prog_start  = 0x200
 let graph_start = 0xF00
 (* Here we define the keyboard layout *)
-let layout = "\"'(-ertydfghcvbn"
+let layout = "\"\'(-ertydfghcvbn"
 (* The interpreter has to have a simple font built into its
  * ram *)
 let font =
@@ -148,7 +148,6 @@ let rec draw ?rel_y:(rel_y=0) display =
 let rec draw_sprite x y bytes =
   let fx = x mod 64 + ((int_of_bool (x < 0)) * 32) in
   let fy = y mod 32 + ((int_of_bool (y < 0)) * 32) in
-
   match x mod 8 with
     0 ->
     regs.(0xF) <- 0;
@@ -159,7 +158,7 @@ let rec draw_sprite x y bytes =
       ram.(place) <- byte lxor ram.(place); (* The sprite is "xored" on
                                              * the screen. *)
       if regs.(0xF) = 0 then
-        regs.(0xF) <- int_of_bool (save > (save land ram.(place)))
+        regs.(0xF) <- !@(save > (save land ram.(place)))
     in
     Array.iteri place bytes
   | m ->
@@ -228,12 +227,12 @@ let decode_opcode opcode =
     (* 3XKK : Skip the next instruction if the value in the register number X
      * is equal to KK by comparing them and adding 2 to them program counter
      * if needed *)
-    if kk = regs.(x) then pc += 2
+    pc += !@(kk = regs.(x)) * 2
   | 0x4 ->
     (* 4XKK : Skip the next instruction if the value in the register number X
      * is not nequal to KK by comparing them and adding 2 to them program counter
      * if needed *)
-    if kk <> regs.(x) then pc += 2
+   pc += !@(kk <> regs.(x)) * 2
   | 0x5 ->
     begin
       match n with
@@ -296,7 +295,7 @@ let decode_opcode opcode =
         (* 9XY0 : Skip the next instruction if the values in the registers X and
          * Y are not equal by comparing them and adding 2 to the program counter if
          * needed. *)
-        if x <> y then pc += 2
+        pc += !@(regs.(y) <> regs.(x)) * 2
       | _ -> raise Unknown_opcode
     end
   | 0xA ->
@@ -338,7 +337,7 @@ let decode_opcode opcode =
         (* FX0A : wait for a keypress and put its result in the X register. *)
         let rec wait_for_key () =
           match String.index_opt layout (Graphics.read_key()) with
-            None -> wait_for_key ()
+            None   -> wait_for_key ()
           | Some x -> x
         in
         regs.(x) <- wait_for_key()
@@ -392,12 +391,10 @@ let decode_opcode opcode =
 let cycle() =
   sound_timer += - int_of_bool (!sound_timer > 0);
   delay_timer += - int_of_bool (!delay_timer > 0);
-  (*print_int (ram.(!pc) lsl 8 lor ram.(!pc + 1));*)
+  print_int (ram.(!pc) lsl 8 lor ram.(!pc + 1));
   print_newline();
   decode_opcode ((ram.(!pc) lsl 8) lor ram.(!pc + 1));
-  pc += 2;
-  print_int regs.(0xF);
-  print_newline()
+  pc += 2
 
 let _ =
   init();
