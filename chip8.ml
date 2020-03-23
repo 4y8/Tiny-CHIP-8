@@ -21,7 +21,7 @@ let stack = Array.make 16 0
 let prog_start  = 0x200
 let graph_start = 0xF00
 (* Here we define the keyboard layout *)
-let layout = "\"\'(-ertydfghcvbn"
+let layout = "\"'(-ertydfghcvbn"
 (* The interpreter has to have a simple font built into its
  * ram *)
 let font =
@@ -180,22 +180,24 @@ let rec draw_sprite x y bytes =
 
 let is_pressed key =
   match Graphics.key_pressed() with
-    false -> false
+    false -> false (* If no key pressed return false. *)
+  (* Return the value of the comparaison between the key pressed
+   * and the expected key. *)
   | _     -> Graphics.read_key() = key
 
 
 (* Decode a 2-bytes opcode and execute its content. *)
 let decode_opcode opcode =
-  let digit0 = get_4bits 0 opcode in
   (* Find the instruction that have to be executed by using
    * the first 4 bits *)
+  let op   = get_4bits 0 opcode in
   (* Gat all the different values that may be used by the opcodes *)
   let kk   = get_byte opcode    in
   let x    = get_4bits 1 opcode in
   let y    = get_4bits 2 opcode in
   let n    = get_4bits 3 opcode in
   let addr = get_addr opcode    in
-  match digit0 with
+  match op with
     0x0 ->
     begin
       match opcode with
@@ -209,7 +211,7 @@ let decode_opcode opcode =
        * stack pointer. *)
       | 0x00EE ->
         pc := stack.(!sp) - 2;
-        sp := !sp - 1     (* Decrements the stack pointer *)
+        sp := !sp - 1 (* Decrements the stack pointer *)
       | _ -> raise Unknown_opcode
     end
   | 0x1 ->
@@ -220,9 +222,9 @@ let decode_opcode opcode =
     (* 2NNN : Call the subroutine at the adress NNN, defined by the 12
      * last bits, by saving the program counter on top of the stack and
      *  setting the program counter to the adress.*)
-    sp += 1;            (*         Increments the stack pointer         *)
+    sp += 1;                (*         Increments the stack pointer         *)
     stack.(!sp) <- !pc + 2; (* Save the program counter on top of the stack *)
-    pc := addr - 2      (*   Set the program counter to its new value   *)
+    pc := addr - 2          (*   Set the program counter to its new value   *)
   | 0x3 ->
     (* 3XKK : Skip the next instruction if the value in the register number X
      * is equal to KK by comparing them and adding 2 to them program counter
@@ -240,7 +242,7 @@ let decode_opcode opcode =
         (* 5XY0 : Skip the next instruction if the values in the registers X and
          * Y are equal by comparing them and adding 2 to the program counter if
          * needed. *)
-        if x = y then pc += 2
+        if regs.(x) = regs.(y) then pc += 2
       | _ -> raise Unknown_opcode
     end
   | 0x6 ->
@@ -248,8 +250,7 @@ let decode_opcode opcode =
     regs.(x) <- kk
   | 0x7 ->
     (* 7XKK : Increments the register X by the value KK *)
-    regs.(x) <- (kk + regs.(x)) mod 256; (* We can't use the function += because it is an
-                                          * array and not a mutable variable. *)
+    regs.(x) <- (kk + regs.(x)) mod 256;
   | 0x8 ->
     begin
       match n with
@@ -265,26 +266,25 @@ let decode_opcode opcode =
        * Y and set the register F to 1 if the sum overflows. *)
       | 4 ->
         let sum = regs.(x) + regs.(y) in
-        regs.(0xF) <- !@(sum < 255);
-        regs.(x) <- sum mod 256; (* Here we simulate an add overflow. *)
+        regs.(0xF) <- !@(sum > 255);
+        regs.(x)   <- sum mod 256; (* Here we simulate an add overflow. *)
       (* 8XY5 : stores in the register X the difference between the registers
        * X and Y and set the register F to 1 if there isn't a quarry. *)
       | 5 ->
-        regs.(x) <- regs.(x) - regs.(y);
-        regs.(0xF) <- int_of_bool (regs.(x) > regs.(y));
-        if regs.(x) < regs.(y) then regs.(x) <- regs.(x) + 256
+        regs.(0xF) <- int_of_bool (regs.(x) >= regs.(y));
+        regs.(x) <- regs.(x) - regs.(y) + regs.(15) * 256;
        (* We can't have a negative number in the register*)
       | 6 ->
         (* 8XY6 : set the last bit of X in the register F and perform a
          * bitwise right shift to the register X *)
-        regs.(0xF) <- regs.(x) land 1;
+        regs.(0xF) <- regs.(x) land 1; (* Get the last significant bit. *)
         regs.(x)   <- regs.(x) asr 1
       | 7 ->
         regs.(x)   <- regs.(y) - regs.(x);
-        regs.(0xF) <- int_of_bool (regs.(x) < regs.(y));
+        regs.(0xF) <- int_of_bool (regs.(x) <= regs.(y));
         if regs.(x) > regs.(y) then regs.(x) <- regs.(x) + 256
       | 0xE ->
-        regs.(0xF) <- (regs.(x) asr 7) land 1;
+        regs.(0xF) <- (regs.(x) asr 7) land 1; (* Get the most significant bit. *)
         regs.(x)   <- (regs.(x) lsl 1) land 0xFF
       | _ -> raise Unknown_opcode
     end
@@ -336,9 +336,10 @@ let decode_opcode opcode =
       | 0x0A ->
         (* FX0A : wait for a keypress and put its result in the X register. *)
         let rec wait_for_key () =
+          (* Check if the key pressed is in the layout. *)
           match String.index_opt layout (Graphics.read_key()) with
-            None   -> wait_for_key ()
-          | Some x -> x
+            None     -> wait_for_key () (* If it's not try another time. *)
+          | Some key -> key             (* Else return the key. *)
         in
         regs.(x) <- wait_for_key()
       | 0x15 ->
@@ -346,7 +347,7 @@ let decode_opcode opcode =
          * register X. *)
         delay_timer := regs.(x)
       | 0x18 ->
-        (* FX15 : Set the value of the sound timer to the value of the
+        (* FX18 : Set the value of the sound timer to the value of the
          * register X. *)
         sound_timer := regs.(x)
       | 0x1E ->
@@ -372,7 +373,7 @@ let decode_opcode opcode =
             ram.(!i + pos) <- hd;
             save_reg tl (pos + 1)
         in
-        save_reg (Array.to_list (Array.sub regs 0 x)) 0
+        save_reg (Array.to_list (Array.sub regs 0 (x + 1))) 0
       | 0x65 ->
        (* FX65 : read the registers from 0 to X from the ram starting at the
          * address strored in i. *)
@@ -383,7 +384,7 @@ let decode_opcode opcode =
             regs.(pos) <- hd;
             read_reg tl (pos + 1)
         in
-        read_reg (Array.to_list (Array.sub ram !i x)) 0
+        read_reg (Array.to_list (Array.sub ram !i (x + 1))) 0
       | _ -> raise Unknown_opcode
     end
   | _   -> raise Unknown_opcode
