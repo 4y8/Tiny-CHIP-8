@@ -176,7 +176,7 @@ let rec draw_sprite x y bytes =
     in
     let shift2 = Array.map shift_left bytes in
     draw_sprite (8 * (fx / 8) + 8) fy shift2;
-    regs.(0xF) <- (sv + regs.(0xF)) / 2
+    regs.(0xF) <- sv lor regs.(0xF)
 
 let is_pressed key =
   match Graphics.key_pressed() with
@@ -390,8 +390,12 @@ let decode_opcode opcode =
   | _   -> raise Unknown_opcode
 
 let cycle() =
-  sound_timer += - int_of_bool (!sound_timer > 0);
-  delay_timer += - int_of_bool (!delay_timer > 0);
+  if (Unix.gettimeofday() -. !last_time) >= 1.0/.60.0 then
+    begin
+      last_time   := Unix.gettimeofday();
+      sound_timer += - int_of_bool (!sound_timer > 0);
+      delay_timer += - int_of_bool (!delay_timer > 0)
+    end;
   print_int (ram.(!pc) lsl 8 lor ram.(!pc + 1));
   print_newline();
   decode_opcode ((ram.(!pc) lsl 8) lor ram.(!pc + 1));

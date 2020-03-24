@@ -2,7 +2,8 @@
 |----------------+-------------------------------------------------------|
 | Maze           | Works                                                 |
 | Zero           | Works                                                 |
-| Pong           | 50% (physics and score don't always wprk)             |
-| Sierpinski     | 0% (nothing happens)                                  |
+| Pong           | 50% (physics and score don't always work)             |
+| Sierpinski     | 10% (only the top appears)                            |
 | Space Invaders | 50% (the screen title works but not all the controls) |
-| Puzzle         | 50% (the graphics are corrupted)                      |
+| Puzzle         | Works                                                 |
+| Tetris         | Works                                                 |
