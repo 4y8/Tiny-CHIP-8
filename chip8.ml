@@ -257,7 +257,7 @@ let decode_opcode opcode =
       (* 8XY0 : stores the value of the register Y in the register X. *)
         0 -> regs.(x) <- regs.(y)
       (* 8XY1 : stores in the register X the bitwise or of X and Y. *)
-      | 1 -> regs.(x) <- regs.(y) lor regs.(x)
+      | 1 -> regs.(x) <- regs.(x) lor regs.(y)
       (* 8XY2 : stores in the register X the bitwise and of X and Y. *)
       | 2 -> regs.(x) <- regs.(y) land regs.(x)
       (* 8XY3 : stores in the register X the bitwise xor of X and Y. *)
@@ -271,7 +271,7 @@ let decode_opcode opcode =
       (* 8XY5 : stores in the register X the difference between the registers
        * X and Y and set the register F to 1 if there isn't a quarry. *)
       | 5 ->
-        regs.(0xF) <- int_of_bool (regs.(x) >= regs.(y));
+        regs.(0xF) <- int_of_bool (regs.(x) > regs.(y));
         regs.(x) <- regs.(x) - regs.(y) + regs.(15) * 256;
        (* We can't have a negative number in the register*)
       | 6 ->
@@ -280,8 +280,8 @@ let decode_opcode opcode =
         regs.(0xF) <- regs.(x) land 1; (* Get the last significant bit. *)
         regs.(x)   <- regs.(x) asr 1
       | 7 ->
+        regs.(0xF) <- int_of_bool (regs.(x) < regs.(y));
         regs.(x)   <- regs.(y) - regs.(x);
-        regs.(0xF) <- int_of_bool (regs.(x) <= regs.(y));
         if regs.(x) > regs.(y) then regs.(x) <- regs.(x) + 256
       | 0xE ->
         regs.(0xF) <- (regs.(x) asr 7) land 1; (* Get the most significant bit. *)
