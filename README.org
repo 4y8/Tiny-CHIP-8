@@ -1,0 +1,20 @@
+#+TITLE: Tiny CHIP-8
+
+This reporsitory contain my CHIP-8 interpreter written in Ocaml, using only the
+official Graphics library. It is aimed to be small : only 256 lines of code
+(without blank lines and comments).
+* Install
+Intsall the Graphics library and the dune build system using opam if you haven't
+already:
+#+BEGIN_SRC
+opam install graphics dune
+#+END_SRC
+Then build the interpreter using the following command :
+#+BEGIN_SRC
+dune build chip8.exe
+#+END_SRC
+* Usage
+To run a game, use the following command :
+#+BEGIN_SRC
+dune exec -- chip8.exe "the game"
+#+END_SRC
