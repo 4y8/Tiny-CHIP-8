@@ -21,7 +21,8 @@ let stack = Array.make 16 0
 let prog_start  = 0x200
 let graph_start = 0xF00
 (* Here we define the keyboard layout *)
-let layout = "\"'(-ertydfghcvbn"
+let layout = "v\"'(ertdfgcb-yhn"
+let key_pressed = ref 0
 (* The interpreter has to have a simple font built into its
  * ram *)
 let font =
@@ -67,29 +68,8 @@ let rec ( *** ) a b =
 let ( += ) a b =
   a := !a + b
 
-(* Here we declare a function to get 4 bits of an integer which
- * coresponds to a hexadecimal digit and in order to decode
- * opcodes, we need to analyze each hex digit. *)
-
-let rec get_4bits ?rel_pos:(rel_pos=0) position bits = 
-  (* Here we substract 4 times the position to 12 because it 
-     allows the position 0 to be the left digit and 3 the right *)
-  let bit = (bits asr (12 - position * 4 + rel_pos)) land 1 in
-  match rel_pos with 
-    4 -> 0
-  | _ ->
-    bit * (2 *** rel_pos) + get_4bits position bits ~rel_pos:(rel_pos + 1)
-
-(* Addresses in opcodes are always the 12 last bits, so this functions
- * get them and return a valid int representing the address *)
-let get_addr bits =
-  256 * (get_4bits 1 bits) + 16 * (get_4bits 2 bits) + (get_4bits 3 bits)
-
 (* Some opcodes relie on the last byte to handle values, so this
  * function gets it and return its value. *)
-
-let get_byte bits =
-  16 * get_4bits 2 bits + get_4bits 3 bits
 
 let int_of_bool bool =
   match bool with
@@ -108,13 +88,13 @@ let init () =
   pc := prog_start;
   (* An opcode needs a random number, so we initiate the generator. *)
   Random.self_init();
- let ic = open_in Sys.argv.(1) in
+  let ic = open_in Sys.argv.(1) in
   let rec read_chan chan pos =
     try
       ram.(prog_start + pos) <- Char.code (input_char ic);
       read_chan chan (pos + 1)
     with
-      End_of_file -> ()
+      End_of_file -> close_in chan
   in
   read_chan ic 0
 
@@ -178,25 +158,17 @@ let rec draw_sprite x y bytes =
     draw_sprite (8 * (fx / 8) + 8) fy shift2;
     regs.(0xF) <- sv lor regs.(0xF)
 
-let is_pressed key =
-  match Graphics.key_pressed() with
-    false -> false (* If no key pressed return false. *)
-  (* Return the value of the comparaison between the key pressed
-   * and the expected key. *)
-  | _     -> Graphics.read_key() = key
-
-
 (* Decode a 2-bytes opcode and execute its content. *)
 let decode_opcode opcode =
   (* Find the instruction that have to be executed by using
    * the first 4 bits *)
-  let op   = get_4bits 0 opcode in
+  let op   = (opcode land 0xF000) asr 12 in
   (* Gat all the different values that may be used by the opcodes *)
-  let kk   = get_byte opcode    in
-  let x    = get_4bits 1 opcode in
-  let y    = get_4bits 2 opcode in
-  let n    = get_4bits 3 opcode in
-  let addr = get_addr opcode    in
+  let kk   = opcode land 0x00FF in
+  let x    = (opcode land 0x0F00) asr 8 in
+  let y    = (opcode land 0x00F0) asr 4 in
+  let n    = opcode land 0x000F in
+  let addr = opcode land 0x0FFF in
   match op with
     0x0 ->
     begin
@@ -320,11 +292,11 @@ let decode_opcode opcode =
         0x9E ->
         (* EX9E : skips the next instruction if the key pressed has the
          * same value as the one in the register X. *)
-        pc += 2 * int_of_bool (is_pressed(String.get layout regs.(x)))
+        pc += 2 * int_of_bool (!key_pressed = regs.(x))
       | 0xA1 ->
         (* EX9E : skips the next instruction if the key pressed has not
          * the same value as the one in the register X. *)
-        pc += 2 * int_of_bool (not (is_pressed(String.get layout regs.(x))))
+        pc += 2 * int_of_bool (!key_pressed <> regs.(x))
       | _ -> raise Unknown_opcode
     end
   | 0xF ->
@@ -394,7 +366,16 @@ let cycle() =
     begin
       last_time   := Unix.gettimeofday();
       sound_timer += - int_of_bool (!sound_timer > 0);
-      delay_timer += - int_of_bool (!delay_timer > 0)
+      delay_timer += - int_of_bool (!delay_timer > 0);
+      key_pressed :=
+        match Graphics.key_pressed() with
+          false -> -1
+        | true  ->
+          begin
+            match String.index_opt layout (Graphics.read_key()) with
+              None -> -1
+            | Some x -> x
+          end
     end;
   print_int (ram.(!pc) lsl 8 lor ram.(!pc + 1));
   print_newline();
