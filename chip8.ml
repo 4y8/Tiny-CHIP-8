@@ -171,7 +171,7 @@ let decode_opcode opcode =
        * for the graphics to zero. *)
         0x00E0 ->
         Array.fill ram graph_start 256 0;
-        draw (Array.sub ram graph_start 256 )
+        draw (Array.sub ram graph_start 256)
       (* 00EE : Return from a subroutine by setting the program counter
        * to the value on the top of the stack and decrementing the
        * stack pointer. *)
@@ -341,11 +341,12 @@ let decode_opcode opcode =
 let cycle() =
   if (Unix.gettimeofday() -. !last_time) >= 1./.60. then
     begin
-      last_time   := Unix.gettimeofday();
+      last_time := Unix.gettimeofday();
       if !sound_timer > 0 then
         begin
-          delay_timer += -1;
-          Graphics.sound 523 10
+          sound_timer += -1;
+          (* Plays a beep in the background so it won't block the interpreter. *)
+          if (Sys.command "paplay beep.wav &") <> 0 then raise Internal_error
         end;
       delay_timer += - int_of_bool (!delay_timer > 0);
       key_pressed :=
