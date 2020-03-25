@@ -11,6 +11,12 @@ already:
 #+BEGIN_SRC
 opam install graphics dune
 #+END_SRC
+I'm using an azerty keyboard so the keyboard layout of the interpreter is suited
+for it, if you have a qwerty keyboard you can adjust the layout using the
+included patch, using this command:
+#+BEGIN_SRC
+patch -p0 < patches/qwerty.patch
+#+END_SRC
 Then build the interpreter using the following command :
 #+BEGIN_SRC
 dune build chip8.exe

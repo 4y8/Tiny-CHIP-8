@@ -1,0 +1,11 @@
+--- chip8.ml	2020-03-25 11:19:48.813476445 +0100
++++ chip8_qwerty.ml	2020-03-25 11:46:46.365828401 +0100
+@@ -21,7 +21,7 @@
+ let prog_start  = 0x200
+ let graph_start = 0xF00
+ (* Here we define the keyboard layout *)
+-let layout = "v\"'(ertdfgcb-yhn"
++let layout = "x123qweasdizc4rvf"
+ let key_pressed = ref 0
+ (* The interpreter has to have a simple font built into its
+  * ram *)
